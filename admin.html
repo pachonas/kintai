@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ひろ農林 勤怠 管理ページ</title>
+  <!-- ブランディング用: テーマカラー・アイコン
+       ※ manifest.json はあえてリンクしない
+         （リンクすると「ホーム画面に追加」時に start_url=index.html で開いてしまうため） -->
+  <meta name="theme-color" content="#2D2016">
+  <link rel="apple-touch-icon" href="./apple-touch-icon.png">
+  <link rel="icon" href="./icons/icon-192.png">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%;
+      font-family: 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', 'Meiryo', sans-serif;
+      background: #eceff1;
+      color: #212121;
+    }
+
+    /* ===== ヘッダー ===== */
+    /* 打刻ページと同じ「白地バンド + 公式ロゴ + 黄緑→青のグラデーション下線」で統一
+       （border-image非対応の古い環境では黄緑1色にフォールバック） */
+    header {
+      background: #fff;
+      color: #2D2016;
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+      border-bottom: 4px solid #81BC3D;
+      border-image: linear-gradient(90deg, #81BC3D, #339AD2) 1;
+    }
+    .header-brand { display: flex; align-items: center; gap: 14px; }
+    .header-logo  { height: 44px; width: auto; display: block; }
+    .header-title    { font-size: 24px; font-weight: 700; letter-spacing: 0.05em; }
+    .header-subtitle { font-size: 15px; color: #666; }
+
+    /* ===== 月切り替え ===== */
+    .month-nav { display: flex; align-items: center; gap: 16px; }
+    .month-nav button {
+      background: #fff;
+      border: 2px solid #4E7A1E;
+      border-radius: 10px;
+      color: #4E7A1E;
+      font-size: 22px; font-weight: 700;
+      padding: 8px 20px;
+      cursor: pointer; touch-action: manipulation;
+    }
+    .month-nav button:hover    { background: #EEF5E2; }
+    .month-nav button:disabled { opacity: 0.35; cursor: default; }
+    .month-label {
+      font-size: 26px; font-weight: 700;
+      min-width: 160px; text-align: center;
+    }
+
+    /* ===== メイン ===== */
+    main { max-width: 900px; margin: 0 auto; padding: 24px 16px 40px; }
+
+    /* ===== アラートバナー ===== */
+    .alert-banner {
+      background: #fff3e0;
+      border: 3px solid #ff9800;
+      border-radius: 14px;
+      padding: 18px 24px;
+      margin-bottom: 24px;
+      display: flex; align-items: center; gap: 12px;
+    }
+    .alert-banner .alert-icon { font-size: 32px; }
+    .alert-banner .alert-text { font-size: 20px; font-weight: 700; color: #e65100; }
+
+    /* ===== サマリーカード ===== */
+    .summary-card {
+      background: #fff;
+      border-radius: 16px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+      overflow: hidden;
+      margin-bottom: 24px;
+    }
+    .summary-card-header {
+      background: #17618F; color: #fff; /* ロゴの青を白文字AAコントラストまで濃くした派生色 */
+      padding: 16px 24px;
+      font-size: 20px; font-weight: 700;
+    }
+
+    /* ===== テーブル ===== */
+    .summary-table { width: 100%; border-collapse: collapse; }
+    .summary-table thead tr { background: #E4F1F9; }
+    .summary-table th {
+      padding: 16px 12px;
+      font-size: 18px; font-weight: 700; color: #17618F;
+      text-align: center;
+      border-bottom: 2px solid #BCDCEF;
+    }
+    .summary-table th:first-child { text-align: left; padding-left: 20px; }
+    .summary-table tbody tr {
+      border-bottom: 1px solid #e0e0e0;
+      transition: background 0.15s;
+    }
+    .summary-table tbody tr:hover  { background: #f5f9ff; }
+    .summary-table tbody tr:last-child { border-bottom: none; }
+    .summary-table td {
+      padding: 20px 12px;
+      font-size: 22px; text-align: center; vertical-align: middle;
+    }
+    .summary-table td:first-child {
+      text-align: left; padding-left: 20px;
+      font-weight: 700; font-size: 24px;
+    }
+    .td-amount { font-weight: 700; color: #17618F; font-size: 24px; }
+
+    /* ===== 日別明細（アコーディオン） ===== */
+    /* スタッフ行はタップで明細を開閉できる */
+    .staff-row { cursor: pointer; }
+    .td-expand {
+      font-size: 16px; color: #17618F; font-weight: 700;
+      white-space: nowrap; padding-right: 16px !important;
+    }
+    .detail-row td { padding: 0 !important; background: #f7f9f7; }
+    .detail-box {
+      padding: 8px 16px 16px;
+      border-top: 2px solid #D6E8BC;
+      border-bottom: 2px solid #D6E8BC;
+    }
+    .day-line {
+      display: grid;
+      grid-template-columns: 1.2fr 1fr 1.2fr 1.3fr;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 8px;
+      border-bottom: 1px solid #e0e0e0;
+      font-size: 20px;
+      line-height: 1.6;
+    }
+    .day-line:last-child { border-bottom: none; }
+    .day-head {
+      font-size: 15px; font-weight: 700; color: #666;
+      padding: 10px 8px 6px;
+    }
+    .day-date  { font-weight: 700; }
+    .day-hours { font-weight: 700; text-align: right; }
+    /* 退勤の記録がない日（要修正）は赤系で目立たせる */
+    .day-alert { background: #fdecea; }
+    .day-alert .day-out, .day-alert .day-hours { color: #c62828; font-weight: 700; }
+    /* 当日でまだ退勤していない人は緑の「勤務中」 */
+    .day-working .day-out { color: #4E7A1E; font-weight: 700; }
+    .detail-empty {
+      padding: 20px 8px; font-size: 19px; color: #888; text-align: center;
+    }
+
+    /* ===== 合計行 ===== */
+    .total-row { background: #e8eaf6 !important; }
+    .total-row td { font-weight: 700 !important; font-size: 24px !important; }
+    .total-row td:first-child { font-size: 22px !important; }
+
+    .note {
+      font-size: 15px; color: #888;
+      padding: 12px 20px 16px; line-height: 1.7;
+    }
+
+    /* ===== ローディング ===== */
+    .loading-area { text-align: center; padding: 60px 20px; }
+    .spinner {
+      width: 56px; height: 56px;
+      border: 6px solid #e0e0e0;
+      border-top-color: #2373A6;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 20px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-area p { font-size: 20px; color: #777; }
+
+    /* ===== エラー ===== */
+    .error-area {
+      text-align: center; padding: 60px 20px;
+      background: #fff; border-radius: 16px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+    }
+    .error-area .error-icon { font-size: 56px; margin-bottom: 16px; }
+    .error-area p { font-size: 20px; color: #c62828; }
+
+    .no-data { text-align: center; padding: 48px; font-size: 20px; color: #999; }
+
+    .hidden { display: none !important; }
+
+    @media (max-width: 600px) {
+      header { padding: 12px 16px; }
+      .header-logo  { height: 36px; }
+      .header-title { font-size: 20px; }
+      .summary-table th, .summary-table td { padding: 14px 8px; font-size: 18px; }
+      .summary-table td:first-child { font-size: 20px; }
+      .td-amount { font-size: 20px; }
+      .td-expand { font-size: 13px; padding-right: 8px !important; }
+      .day-line { font-size: 16px; padding: 10px 4px; gap: 4px; }
+      .day-head { font-size: 12px; }
+      .detail-box { padding: 4px 8px 12px; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="header-brand">
+    <img src="./assets/logo_header.png" alt="ひろ農林" class="header-logo">
+    <div>
+      <div class="header-title">勤怠</div>
+      <div class="header-subtitle">管理ページ（見るだけ）</div>
+    </div>
+  </div>
+  <div class="month-nav">
+    <button id="btn-prev" onclick="changeMonth(-1)" title="先月">&#9664;</button>
+    <span id="month-label" class="month-label">----年--月</span>
+    <button id="btn-next" onclick="changeMonth(1)" title="今月" disabled>&#9654;</button>
+  </div>
+</header>
+
+<main>
+  <!-- ローディング -->
+  <div id="area-loading" class="loading-area">
+    <div class="spinner"></div>
+    <p>データを読み込んでいます...</p>
+  </div>
+
+  <!-- エラー -->
+  <div id="area-error" class="error-area hidden">
+    <div class="error-icon">&#x26A0;&#xFE0F;</div>
+    <p id="error-msg">データの取得に失敗しました。ページを再読み込みしてください。</p>
+  </div>
+
+  <!-- コンテンツ -->
+  <div id="area-content" class="hidden">
+
+    <!-- 要修正アラート -->
+    <div id="alert-banner" class="alert-banner hidden">
+      <span class="alert-icon">&#x26A0;&#xFE0F;</span>
+      <span id="alert-text" class="alert-text"></span>
+    </div>
+
+    <!-- サマリーテーブル -->
+    <div class="summary-card">
+      <div class="summary-card-header" id="table-header">----年--月 給与集計</div>
+      <table class="summary-table">
+        <thead>
+          <tr>
+            <th>名前</th>
+            <th>勤務日数</th>
+            <th>合計時間</th>
+            <th>支払額</th>
+            <th></th><!-- 「詳しく ▼」列 -->
+          </tr>
+        </thead>
+        <tbody id="summary-tbody"></tbody>
+      </table>
+      <div class="note">
+        ※ 名前の行を押すと、その人の日ごとの出勤・退勤の記録が開きます。<br>
+        ※ 勤務時間は1日ごとに15分単位（切り捨て）で計算しています。<br>
+        ※ 1日の合計が15分未満の日は0分と表示され、勤務日数には入りません。<br>
+        ※ 昼休憩などで1日に複数回打刻した場合は、出勤→退勤の組ごとの時間を合計しています。<br>
+        ※ 支払額は調整額（交通費・手当など）を含んだ金額です。<br>
+        ※「要修正」の打刻（退勤漏れ等）は集計から除外されています。
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<script>
+  // ============================================================
+  // 設定
+  // ============================================================
+  // ここを書き換えてください: GAS デプロイ後の /exec URL を入力する
+  // 例: const API_URL = 'https://script.google.com/macros/s/AKfycb.../exec';
+  const API_URL = 'https://script.google.com/macros/s/AKfycbzpTbHPoeHRIcbCaVp0ldKzStjWkV_wOE_7wDvxGskChjz263c8-xIa1Vm_o9vUgHXijg/exec';
+
+  // ============================================================
+  // 状態
+  // ============================================================
+  // このページは通常の静的ホスティング（GitHub Pages）で動作するため、
+  // window.location.search からURLパラメータを正常に取得できる。
+  let currentOffset = 0; // 0=今月, -1=先月
+  const MIN_OFFSET  = -12;
+
+  // 管理トークンをURLパラメータから取得（静的ホスティングなので window.location.search が使える）
+  // ホーム画面追加などでクエリなしで開かれた場合に備え、URLで受け取ったトークンは
+  // localStorage に保存し、次回以降はそこから復元する（保存不可環境でも動作継続できるよう try-catch で保護）。
+  const params  = new URLSearchParams(window.location.search);
+  const fromUrl = params.get('admin');
+  if (fromUrl) {
+    try { localStorage.setItem('kintai_admin_token', fromUrl); } catch (e) { /* 保存できなくても続行 */ }
+  }
+  let storedAdminToken = '';
+  try { storedAdminToken = localStorage.getItem('kintai_admin_token') || ''; } catch (e) { /* 取得できなければ空のまま */ }
+  const ADMIN_TOKEN = fromUrl || storedAdminToken;
+
+  // ============================================================
+  // API呼び出しヘルパー
+  // ============================================================
+  /**
+   * GAS JSON API を呼び出す。
+   * Content-Type は text/plain;charset=utf-8 を使う。
+   *   → application/json にするとブラウザがプリフライト(OPTIONS)を送信するが、
+   *     GASはOPTIONSリクエストに応答できないため必ず失敗する。
+   *     text/plain は「シンプルリクエスト」扱いになりプリフライトが発生しない。
+   * redirect: 'follow' を指定する。
+   *   → GASの /exec は最初に302リダイレクトを返す（googleusercontent.com ドメインへ）。
+   *     'follow' でリダイレクト先まで自動的に追いかける。
+   * @param {Object} payload
+   * @returns {Promise<Object>}
+   */
+  async function callApi(payload) {
+    const resp = await fetch(API_URL, {
+      method: 'POST',
+      redirect: 'follow',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload),
+    });
+    if (!resp.ok) {
+      throw new Error('HTTP ' + resp.status);
+    }
+    return await resp.json();
+  }
+
+  // ============================================================
+  // 初期化
+  // ============================================================
+  window.addEventListener('load', function() {
+    if (!ADMIN_TOKEN) {
+      showArea('error');
+      document.getElementById('error-msg').textContent =
+        'URLが正しくありません。管理者ページのブックマークから開いてください。';
+      return;
+    }
+    loadData(currentOffset);
+  });
+
+  // ============================================================
+  // 月切り替え
+  // ============================================================
+  function changeMonth(direction) {
+    const next = currentOffset + direction;
+    if (next > 0 || next < MIN_OFFSET) return;
+    currentOffset = next;
+    updateNavButtons();
+    loadData(currentOffset);
+  }
+
+  function updateNavButtons() {
+    document.getElementById('btn-prev').disabled = (currentOffset <= MIN_OFFSET);
+    document.getElementById('btn-next').disabled = (currentOffset >= 0);
+  }
+
+  // ============================================================
+  // データ取得
+  // ============================================================
+  async function loadData(offset) {
+    showArea('loading');
+    try {
+      // ADMIN_TOKEN はサーバー側で再検証される（給与情報保護のため必須）
+      const result = await callApi({
+        action:      'getAdminSummary',
+        adminToken:  ADMIN_TOKEN,
+        monthOffset: offset,
+      });
+
+      if (!result || !result.success) {
+        showArea('error');
+        document.getElementById('error-msg').textContent =
+          result && result.message
+            ? result.message
+            : 'データの取得に失敗しました。ページを再読み込みしてください。';
+        return;
+      }
+      renderTable(result);
+      showArea('content');
+
+    } catch (err) {
+      showArea('error');
+      document.getElementById('error-msg').textContent =
+        '通信エラーが発生しました。電波の良いところでページを再読み込みしてください。';
+    }
+  }
+
+  // ============================================================
+  // テーブル描画
+  // ============================================================
+  function renderTable(data) {
+    const year       = data.year;
+    const month      = data.month;
+    const summary    = data.summary    || [];
+    const alertCount = data.alertCount || 0;
+
+    document.getElementById('month-label').textContent  = year + '年' + month + '月';
+    document.getElementById('table-header').textContent = year + '年' + month + '月 給与集計';
+
+    const banner = document.getElementById('alert-banner');
+    const alertDetails = data.alertDetails; // 新GASのみ返す追加フィールド（B3）
+    if (Array.isArray(alertDetails) && alertDetails.length > 0) {
+      // 「誰の・何日・出勤/退勤」まで表示する（最大5件列挙＋超過分は件数でまとめる）
+      const MAX_LISTED = 5;
+      const listed = alertDetails.slice(0, MAX_LISTED).map(function(a) {
+        return a.name + 'さん ' + a.date + 'の' + a.kind;
+      }).join('、');
+      const rest = alertDetails.length - MAX_LISTED;
+      document.getElementById('alert-text').textContent =
+        listed + (rest > 0 ? '（ほか' + rest + '件）' : '') +
+        ' が記録されていません。「修正」シートで直せます。';
+      banner.classList.remove('hidden');
+    } else if (alertCount > 0) {
+      // 旧GASデプロイ（alertDetailsなし）向けのフォールバック文言（後方互換）
+      document.getElementById('alert-text').textContent =
+        '退勤打刻漏れなど「要修正」の記録が ' + alertCount + ' 件あります。スプレッドシートで確認・修正してください。';
+      banner.classList.remove('hidden');
+    } else {
+      banner.classList.add('hidden');
+    }
+
+    const tbody = document.getElementById('summary-tbody');
+    tbody.innerHTML = '';
+
+    if (summary.length === 0) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 5;
+      td.className = 'no-data';
+      td.textContent = 'この月の勤怠データはありません';
+      tr.appendChild(td);
+      tbody.appendChild(tr);
+      return;
+    }
+
+    let totalAmount = 0;
+
+    summary.forEach(function(s) {
+      const tr = document.createElement('tr');
+      tr.className = 'staff-row';
+
+      const tdName   = document.createElement('td');
+      tdName.textContent = s.name;
+
+      const tdDays   = document.createElement('td');
+      tdDays.textContent = s.days + '日';
+
+      const tdHours  = document.createElement('td');
+      tdHours.textContent = s.totalHoursStr;
+
+      const tdAmount = document.createElement('td');
+      tdAmount.className = 'td-amount';
+      tdAmount.textContent = s.amount.toLocaleString('ja-JP') + '円';
+
+      // 開閉インジケーター（行末の「詳しく ▼」）
+      const tdExpand = document.createElement('td');
+      tdExpand.className = 'td-expand';
+      tdExpand.textContent = '詳しく ▼';
+
+      tr.appendChild(tdName);
+      tr.appendChild(tdDays);
+      tr.appendChild(tdHours);
+      tr.appendChild(tdAmount);
+      tr.appendChild(tdExpand);
+      tbody.appendChild(tr);
+
+      // 日別明細行（初期状態は閉じる。月送り時はテーブルごと再描画されるため常に閉じた状態に戻る）
+      const detailTr = document.createElement('tr');
+      detailTr.className = 'detail-row hidden';
+      const detailTd = document.createElement('td');
+      detailTd.colSpan = 5;
+      detailTd.appendChild(buildDetailBox(s.details || []));
+      detailTr.appendChild(detailTd);
+      tbody.appendChild(detailTr);
+
+      // 行タップで開閉（再タップで閉じる）
+      tr.addEventListener('click', function() {
+        const willOpen = detailTr.classList.contains('hidden');
+        detailTr.classList.toggle('hidden');
+        tdExpand.textContent = willOpen ? '閉じる ▲' : '詳しく ▼';
+      });
+
+      totalAmount += s.amount;
+    });
+
+    // 合計行
+    const totalTr = document.createElement('tr');
+    totalTr.className = 'total-row';
+    [
+      '合計', '', '',
+      totalAmount.toLocaleString('ja-JP') + '円',
+      '',
+    ].forEach(function(text, idx) {
+      const td = document.createElement('td');
+      td.textContent = text;
+      if (idx === 3) td.className = 'td-amount';
+      totalTr.appendChild(td);
+    });
+    tbody.appendChild(totalTr);
+  }
+
+  // ============================================================
+  // 日別明細の描画
+  // ============================================================
+  /**
+   * 1人分の日別明細（details配列）から明細ボックスのDOMを組み立てる。
+   * details の要素: {date:'7/1（火）', in:'8:00', out:'12:15', hours:'4時間15分',
+   *                  status:'正常'|'要修正'|'勤務中'}
+   *   - 要修正: 退勤の記録がない日など（赤系で表示）。
+   *     同じ日に成立した出勤→退勤の組があれば hours にその合計が入るため
+   *     「4時間15分＋要修正」のように表示する（hours が空なら従来どおり「要修正」のみ）
+   *   - 勤務中: きょうまだ退勤していない人（緑で表示）
+   *   - 1日に複数回打刻がある場合、in/out は「8:00・13:00」のように「・」区切りで入る
+   * @param {Array} details
+   * @returns {HTMLElement}
+   */
+  function buildDetailBox(details) {
+    const box = document.createElement('div');
+    box.className = 'detail-box';
+
+    if (!details || details.length === 0) {
+      const p = document.createElement('p');
+      p.className = 'detail-empty';
+      p.textContent = 'この月の明細は残っていません';
+      box.appendChild(p);
+      return box;
+    }
+
+    // 見出し行
+    const head = document.createElement('div');
+    head.className = 'day-line day-head';
+    ['日にち', '出勤', '退勤', '稼働時間'].forEach(function(label, idx) {
+      const span = document.createElement('span');
+      span.textContent = label;
+      if (idx === 3) span.style.textAlign = 'right';
+      head.appendChild(span);
+    });
+    box.appendChild(head);
+
+    // 明細行
+    details.forEach(function(d) {
+      const line = document.createElement('div');
+      line.className = 'day-line' +
+        (d.status === '要修正' ? ' day-alert' :
+         d.status === '勤務中' ? ' day-working' : '');
+
+      const spanDate = document.createElement('span');
+      spanDate.className = 'day-date';
+      spanDate.textContent = d.date;
+
+      const spanIn = document.createElement('span');
+      spanIn.className = 'day-in';
+      spanIn.textContent = d.in || '記録なし';
+
+      const spanOut = document.createElement('span');
+      spanOut.className = 'day-out';
+      spanOut.textContent = (d.status === '勤務中') ? '勤務中' : (d.out || '記録なし');
+
+      const spanHours = document.createElement('span');
+      spanHours.className = 'day-hours';
+      // 要修正の日でも、成立している出勤→退勤の組の分は hours に入る（A1・ペア合算方式）
+      spanHours.textContent = (d.status === '要修正')
+        ? (d.hours ? d.hours + '＋要修正' : '要修正')
+        : (d.hours || '');
+
+      line.appendChild(spanDate);
+      line.appendChild(spanIn);
+      line.appendChild(spanOut);
+      line.appendChild(spanHours);
+      box.appendChild(line);
+    });
+
+    return box;
+  }
+
+  // ============================================================
+  // エリア切り替え
+  // ============================================================
+  function showArea(name) {
+    ['loading', 'error', 'content'].forEach(function(n) {
+      const el = document.getElementById('area-' + n);
+      if (el) el.classList.add('hidden');
+    });
+    const target = document.getElementById('area-' + name);
+    if (target) target.classList.remove('hidden');
+  }
+</script>
+</body>
+</html>

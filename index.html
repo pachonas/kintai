@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="ひろ農林 勤怠">
+  <title>ひろ農林 勤怠</title>
+  <!-- PWA用: テーマカラー・アイコン（ロゴの焦げ茶に合わせる） -->
+  <meta name="theme-color" content="#2D2016">
+  <link rel="apple-touch-icon" href="./apple-touch-icon.png">
+  <link rel="icon" href="./icons/icon-192.png">
+  <script>
+    // ============================================================
+    // manifest.json は「iOS以外」のときだけ動的にリンクする
+    // ============================================================
+    // 理由: iOSはホーム画面Webアプリのデータ保存領域がSafari本体と分離されており
+    //       （ホーム画面追加時にlocalStorage等のデータはコピーされない）、
+    //       manifestをリンクすると start_url（トークンなしのURL）で起動するため、
+    //       打刻に必要なトークンをURLからもlocalStorageからも取得できなくなる。
+    //       manifestをリンクしなければ、iOSは「いま開いているURL（?t=トークン付き）」を
+    //       そのままホーム画面に登録するので、アイコン起動時もURLからトークンを取れる。
+    //       standalone起動は上の apple-mobile-web-app-capable メタで維持される。
+    //       Android Chrome はJSで挿入したmanifestでも問題なくインストール判定に使う
+    //       （ブラウザとPWAでlocalStorageを共有するため、AndroidはlocalStorage復元でOK）。
+    (function() {
+      var ua = navigator.userAgent;
+      // iPadOSはUA上「Macintosh」を名乗るため、タッチ対応点数でも判定する
+      var isIOS = /iPhone|iPad|iPod/.test(ua) ||
+                  (ua.indexOf('Macintosh') !== -1 && navigator.maxTouchPoints > 1);
+      if (!isIOS) {
+        var link  = document.createElement('link');
+        link.rel  = 'manifest';
+        link.href = './manifest.json';
+        document.head.appendChild(link);
+      }
+    })();
+  </script>
+  <style>
+    /* ===== リセット & ベース ===== */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%;
+      font-family: 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', 'Meiryo', sans-serif;
+      background: #f5f5f5;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* ヘッダーバーを最上部に固定し、その下に打刻画面を配置する縦レイアウト */
+    body {
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ===== ヘッダーバー（ひろ農林ブランディング） ===== */
+    /* 白地バンドに公式ロゴを載せ、下線はロゴの黄緑→青のグラデーション
+       （border-image非対応の古い環境では黄緑1色にフォールバック） */
+    .app-header {
+      width: 100%;
+      background: #fff;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      border-bottom: 4px solid #81BC3D;
+      border-image: linear-gradient(90deg, #81BC3D, #339AD2) 1;
+    }
+    .header-logo {
+      height: 40px;
+      width: auto;
+      display: block;
+    }
+    .header-label {
+      font-size: 22px;
+      font-weight: 700;
+      color: #2D2016;
+      letter-spacing: 0.08em;
+    }
+
+    /* ===== 退勤漏れ通知バナー（B1・表示のみ） ===== */
+    /* 直近数日に「要修正」の打刻がある本人へ、カード上部で知らせる。
+       本人が操作できる要素は置かない（修正は父母が「修正」シートで行う）。 */
+    .pending-banner {
+      width: 100%;
+      max-width: 420px; /* カードと同幅 */
+      background: #FFF8E1;
+      border: 2px solid #F9A825;
+      border-radius: 14px;
+      padding: 16px 20px;
+      margin-bottom: 16px;
+      color: #795500;
+      font-size: 18px;
+      font-weight: 700;
+      line-height: 1.7;
+      text-align: left;
+    }
+    .pending-banner p + p { margin-top: 10px; }
+
+    /* ===== レイアウト ===== */
+    .page {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      flex: 1; /* ヘッダーを除いた残り全体を使ってカードを中央寄せする */
+      padding: 24px 16px;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 20px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.12);
+      padding: 40px 32px;
+      width: 100%;
+      max-width: 420px;
+      text-align: center;
+    }
+
+    /* ===== ローディング ===== */
+    .spinner {
+      width: 56px; height: 56px;
+      border: 6px solid #e0e0e0;
+      border-top-color: #2373A6;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 20px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #screen-loading p { font-size: 20px; color: #666; }
+
+    /* ===== メイン打刻画面 ===== */
+    .greeting   { font-size: 20px; color: #555; margin-bottom: 8px; }
+    .staff-name { font-size: 36px; font-weight: 700; color: #222; margin-bottom: 20px; }
+
+    .status-badge {
+      display: inline-block;
+      padding: 8px 24px;
+      border-radius: 100px;
+      font-size: 20px; font-weight: 700;
+      margin-bottom: 36px;
+    }
+    .status-absent  { background: #EEF5E2; color: #4E7A1E; }
+    .status-working { background: #E4F1F9; color: #17618F; }
+
+    /* ===== 大ボタン ===== */
+    .btn-stamp {
+      width: 100%;
+      padding: 28px 16px;
+      border: none; border-radius: 18px;
+      font-size: 32px; font-weight: 700;
+      color: #fff;
+      cursor: pointer;
+      transition: transform 0.1s, box-shadow 0.1s;
+      letter-spacing: 0.05em;
+      box-shadow: 0 6px 16px rgba(0,0,0,0.2);
+      touch-action: manipulation;
+    }
+    .btn-stamp:active { transform: scale(0.97); box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+    /* disabled 時: 薄くして二度押し防止を視覚的に示す */
+    .btn-stamp:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    /* ロゴの黄緑・青を白文字コントラストAA（4.5:1以上）まで濃くした派生色 */
+    .btn-checkin  { background: linear-gradient(135deg, #4E7A1E, #446E15); }
+    .btn-checkout { background: linear-gradient(135deg, #2373A6, #17618F); }
+
+    /* ===== 確認ダイアログ ===== */
+    #screen-confirm .confirm-label  { font-size: 22px; color: #444; margin-bottom: 8px; }
+    #screen-confirm .confirm-action { font-size: 34px; font-weight: 700; color: #222; margin-bottom: 40px; }
+    .btn-row { display: flex; gap: 16px; }
+    .btn-yes {
+      flex: 2; padding: 22px; border: none; border-radius: 14px;
+      font-size: 26px; font-weight: 700; color: #fff;
+      cursor: pointer; touch-action: manipulation;
+    }
+    .btn-yes:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-yes-checkin  { background: linear-gradient(135deg, #4E7A1E, #446E15); }
+    .btn-yes-checkout { background: linear-gradient(135deg, #2373A6, #17618F); }
+    .btn-no {
+      flex: 1; padding: 22px;
+      border: 2px solid #ccc; border-radius: 14px;
+      font-size: 22px; font-weight: 700; color: #666;
+      background: #fff; cursor: pointer; touch-action: manipulation;
+    }
+
+    /* ===== 送信中 ===== */
+    #screen-sending p { font-size: 22px; color: #555; }
+
+    /* ===== 完了画面 ===== */
+    #screen-done .done-icon  { font-size: 72px; margin-bottom: 16px; }
+    #screen-done .done-title { font-size: 28px; font-weight: 700; color: #222; margin-bottom: 8px; }
+    #screen-done .done-time  {
+      font-size: 52px; font-weight: 700; color: #17618F;
+      margin-bottom: 24px; letter-spacing: 0.03em;
+    }
+    /* 退勤時のみ表示する「今日の稼働」（B2） */
+    #screen-done .done-hours {
+      font-size: 19px; font-weight: 700; color: #444;
+      margin-bottom: 16px;
+    }
+    #screen-done .done-sub { font-size: 18px; color: #777; }
+    .btn-back {
+      margin-top: 32px; padding: 18px 32px;
+      border: 2px solid #17618F; border-radius: 12px;
+      font-size: 20px; font-weight: 700; color: #17618F;
+      background: #fff; cursor: pointer; width: 100%;
+      touch-action: manipulation;
+    }
+
+    /* ===== エラー画面 ===== */
+    #screen-error .error-icon  { font-size: 64px; margin-bottom: 16px; }
+    #screen-error .error-title { font-size: 26px; font-weight: 700; color: #c62828; margin-bottom: 12px; }
+    #screen-error .error-msg   { font-size: 20px; color: #555; line-height: 1.6; margin-bottom: 32px; }
+    .btn-retry {
+      padding: 22px 32px; border: none; border-radius: 14px;
+      font-size: 24px; font-weight: 700; color: #fff;
+      /* 白文字コントラストAA（4.5:1以上）を満たす濃赤（#d32f2f ≒ 4.98:1） */
+      background: linear-gradient(135deg, #d32f2f, #b71c1c);
+      cursor: pointer; width: 100%; touch-action: manipulation;
+    }
+
+    .hidden { display: none !important; }
+
+    @media (max-width: 600px) {
+      .header-logo { height: 36px; } /* admin.html と同じ縮小率に揃える */
+    }
+  </style>
+</head>
+<body>
+<!-- ヘッダーバー（全画面共通で最上部に表示） -->
+<header class="app-header">
+  <img src="./assets/logo_header.png" alt="ひろ農林" class="header-logo">
+  <span class="header-label">勤怠</span>
+</header>
+
+<div class="page">
+
+  <!-- 退勤漏れ通知バナー（B1・表示のみ。修正は父母が「修正」シートで行う） -->
+  <div id="pending-banner" class="pending-banner hidden"></div>
+
+  <!-- ローディング -->
+  <div id="screen-loading" class="card">
+    <div class="spinner"></div>
+    <p>読み込み中...</p>
+  </div>
+
+  <!-- メイン打刻画面 -->
+  <div id="screen-main" class="card hidden">
+    <p class="greeting">こんにちは</p>
+    <p id="staff-name" class="staff-name">---</p>
+    <span id="status-badge" class="status-badge status-absent">未出勤</span>
+    <button id="btn-stamp" class="btn-stamp btn-checkin" onclick="onStampClick()">出勤</button>
+  </div>
+
+  <!-- 確認ダイアログ -->
+  <div id="screen-confirm" class="card hidden">
+    <p class="confirm-label">確認してください</p>
+    <p id="confirm-action" class="confirm-action">出勤を記録しますか？</p>
+    <div class="btn-row">
+      <button id="btn-yes" class="btn-yes btn-yes-checkin" onclick="onConfirmYes()">記録する</button>
+      <button id="btn-no"  class="btn-no"                  onclick="onConfirmNo()">戻る</button>
+    </div>
+  </div>
+
+  <!-- 送信中 -->
+  <div id="screen-sending" class="card hidden">
+    <div class="spinner"></div>
+    <p>記録しています...</p>
+  </div>
+
+  <!-- 完了画面 -->
+  <div id="screen-done" class="card hidden">
+    <div class="done-icon" id="done-icon">&#x2705;</div>
+    <p id="done-title" class="done-title">出勤を記録しました</p>
+    <p id="done-time"  class="done-time">--:--</p>
+    <p id="done-hours" class="done-hours hidden">今日の稼働: --</p>
+    <p class="done-sub">お疲れさまです！</p>
+    <button class="btn-back" onclick="onBackToMain()">戻る</button>
+  </div>
+
+  <!-- エラー画面 -->
+  <div id="screen-error" class="card hidden">
+    <div class="error-icon">&#x26A0;&#xFE0F;</div>
+    <p class="error-title">エラーが発生しました</p>
+    <p id="error-msg" class="error-msg">もう一度押してください。</p>
+    <button class="btn-retry" onclick="onRetry()">もう一度試す</button>
+  </div>
+
+</div>
+
+<script>
+  // ============================================================
+  // 設定
+  // ============================================================
+  // ここを書き換えてください: GAS デプロイ後の /exec URL を入力する
+  // 例: const API_URL = 'https://script.google.com/macros/s/AKfycb.../exec';
+  const API_URL = 'https://script.google.com/macros/s/AKfycbzpTbHPoeHRIcbCaVp0ldKzStjWkV_wOE_7wDvxGskChjz263c8-xIa1Vm_o9vUgHXijg/exec';
+
+  // ============================================================
+  // 状態管理
+  // ============================================================
+  // このページは通常の静的ホスティング（GitHub Pages）で動作するため、
+  // window.location.search からURLパラメータを正常に取得できる。
+  const appState = {
+    token:         '',
+    staffName:     '',
+    currentStatus: 'absent', // 'absent' | 'working'
+    pendingType:   '',        // '出勤' | '退勤'
+  };
+
+  // ============================================================
+  // 画面切り替え
+  // ============================================================
+  const SCREENS = ['loading', 'main', 'confirm', 'sending', 'done', 'error'];
+
+  function showScreen(name) {
+    SCREENS.forEach(function(s) {
+      const el = document.getElementById('screen-' + s);
+      if (el) el.classList.add('hidden');
+    });
+    const target = document.getElementById('screen-' + name);
+    if (target) target.classList.remove('hidden');
+  }
+
+  // ============================================================
+  // API呼び出しヘルパー
+  // ============================================================
+  /**
+   * GAS JSON API を呼び出す。
+   * Content-Type は text/plain;charset=utf-8 を使う。
+   *   → application/json にするとブラウザがプリフライト(OPTIONS)を送信するが、
+   *     GASはOPTIONSリクエストに応答できないため必ず失敗する。
+   *     text/plain は「シンプルリクエスト」扱いになりプリフライトが発生しない。
+   * redirect: 'follow' を指定する。
+   *   → GASの /exec は最初に302リダイレクトを返す（googleusercontent.com ドメインへ）。
+   *     'follow' でリダイレクト先まで自動的に追いかける。
+   * @param {Object} payload
+   * @returns {Promise<Object>}
+   */
+  async function callApi(payload) {
+    const resp = await fetch(API_URL, {
+      method: 'POST',
+      redirect: 'follow',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload),
+    });
+    if (!resp.ok) {
+      throw new Error('HTTP ' + resp.status);
+    }
+    return await resp.json();
+  }
+
+  // ============================================================
+  // 初期化
+  // ============================================================
+  async function init() {
+    // URLパラメータからトークンを取得（静的ホスティングなので window.location.search が使える）
+    const params  = new URLSearchParams(window.location.search);
+    const fromUrl = params.get('t');
+
+    // PWA（ホーム画面追加）から起動すると start_url にはトークンが付かないため、
+    // URLで受け取ったトークンは localStorage に保存し、次回以降はそこから復元する。
+    // localStorage が使えない環境（プライベートモード等）でも打刻自体は継続できるよう try-catch で保護する。
+    if (fromUrl) {
+      try { localStorage.setItem('kintai_token', fromUrl); } catch (e) { /* 保存できなくても続行 */ }
+    }
+    let storedToken = '';
+    try { storedToken = localStorage.getItem('kintai_token') || ''; } catch (e) { /* 取得できなければ空のまま */ }
+    appState.token = fromUrl || storedToken;
+
+    if (!appState.token) {
+      showErrorScreen(tokenMissingMessage());
+      return;
+    }
+
+    showScreen('loading');
+
+    try {
+      const result = await callApi({ action: 'getStaffStatus', token: appState.token });
+      if (!result.success) {
+        showErrorScreen(result.message);
+        return;
+      }
+      appState.staffName     = result.name;
+      appState.currentStatus = result.status;
+      renderPendingBanner(result.pendingFixes);
+      updateMainScreen();
+      showScreen('main');
+    } catch (err) {
+      showErrorScreen('通信エラーが発生しました。電波の良いところでもう一度お試しください。');
+    }
+  }
+
+  // ============================================================
+  // 退勤漏れ通知バナー（B1）
+  // ============================================================
+  /**
+   * getStaffStatus の pendingFixes（直近数日の要修正打刻）をバナーに表示する。
+   * 要素例: { date: '7/3（金）', kind: '退勤' } … kind は「欠けている側」の種別。
+   * - 表示のみで本人操作は一切なし（修正は父母が「修正」シートで行う）
+   * - 旧GASデプロイ（pendingFixesフィールドなし）や0件時は非表示（後方互換）
+   * @param {Array|undefined} pendingFixes
+   */
+  function renderPendingBanner(pendingFixes) {
+    const banner = document.getElementById('pending-banner');
+    banner.innerHTML = '';
+    if (!Array.isArray(pendingFixes) || pendingFixes.length === 0) {
+      banner.classList.add('hidden');
+      return;
+    }
+    pendingFixes.forEach(function(fix) {
+      const p = document.createElement('p');
+      p.textContent = (fix.kind === '退勤')
+        ? fix.date + 'の退勤が記録されていません。帰った時刻をひろ農林の方に伝えてください。'
+        : fix.date + 'の出勤が記録されていません。ひろ農林の方に伝えてください。';
+      banner.appendChild(p);
+    });
+    banner.classList.remove('hidden');
+  }
+
+  // ============================================================
+  // メイン画面更新
+  // ============================================================
+  function updateMainScreen() {
+    document.getElementById('staff-name').textContent = appState.staffName + ' さん';
+    const badge = document.getElementById('status-badge');
+    const btn   = document.getElementById('btn-stamp');
+
+    if (appState.currentStatus === 'working') {
+      badge.textContent = '勤務中';
+      badge.className   = 'status-badge status-working';
+      btn.textContent   = '退勤';
+      btn.className     = 'btn-stamp btn-checkout';
+    } else {
+      badge.textContent = '未出勤';
+      badge.className   = 'status-badge status-absent';
+      btn.textContent   = '出勤';
+      btn.className     = 'btn-stamp btn-checkin';
+    }
+    btn.disabled = false; // 戻ったときにdisabledを解除
+  }
+
+  // ============================================================
+  // 打刻ボタン → 確認画面
+  // ============================================================
+  function onStampClick() {
+    appState.pendingType = (appState.currentStatus === 'absent') ? '出勤' : '退勤';
+
+    document.getElementById('confirm-action').textContent = appState.pendingType + 'を記録しますか？';
+
+    const yesBtn = document.getElementById('btn-yes');
+    yesBtn.textContent = '記録する';
+    yesBtn.disabled    = false;
+    yesBtn.className   = (appState.pendingType === '出勤')
+      ? 'btn-yes btn-yes-checkin'
+      : 'btn-yes btn-yes-checkout';
+
+    document.getElementById('btn-no').disabled = false;
+    showScreen('confirm');
+  }
+
+  // ============================================================
+  // 確認 → 打刻実行
+  // ============================================================
+  async function onConfirmYes() {
+    // 二度押し防止: ボタンをすぐ無効化
+    document.getElementById('btn-yes').disabled = true;
+    document.getElementById('btn-no').disabled  = true;
+
+    showScreen('sending');
+
+    try {
+      const result = await callApi({
+        action: 'recordStamp',
+        token:  appState.token,
+        type:   appState.pendingType,
+      });
+
+      if (!result.success) {
+        showErrorScreen(result.message);
+        return;
+      }
+
+      const isCheckin = (appState.pendingType === '出勤');
+      document.getElementById('done-icon').textContent  = isCheckin ? '✅' : '👋';
+      document.getElementById('done-title').textContent = result.message;
+      document.getElementById('done-time').textContent  = result.time;
+
+      // 退勤時のみ「今日の稼働」を表示する（B2）。
+      // todayHoursStr は退勤成功時にだけ付くフィールド（存在チェックで分岐）。
+      // 旧GASデプロイやサーバー側の計算失敗でフィールドが無い場合は非表示にする。
+      // 「0分」もあえて表示する（出勤打刻の押し忘れに本人が気づける）。
+      const hoursEl = document.getElementById('done-hours');
+      if (!isCheckin && typeof result.todayHoursStr === 'string' && result.todayHoursStr !== '') {
+        hoursEl.textContent = '今日の稼働: ' + result.todayHoursStr + '（15分単位で計算）';
+        hoursEl.classList.remove('hidden');
+      } else {
+        hoursEl.classList.add('hidden');
+      }
+
+      // 状態を更新
+      appState.currentStatus = isCheckin ? 'working' : 'absent';
+      showScreen('done');
+
+    } catch (err) {
+      showErrorScreen('通信エラーが発生しました。電波の良いところでもう一度お試しください。');
+    }
+  }
+
+  function onConfirmNo() {
+    showScreen('main');
+  }
+
+  // ============================================================
+  // 完了 → メインに戻る
+  // ============================================================
+  function onBackToMain() {
+    updateMainScreen();
+    showScreen('main');
+  }
+
+  // ============================================================
+  // エラー
+  // ============================================================
+  function showErrorScreen(message) {
+    document.getElementById('error-msg').textContent = message;
+    showScreen('error');
+  }
+
+  /**
+   * トークンが見つからないときの案内メッセージを組み立てる。
+   * ホーム画面アイコンからの起動（standalone表示）でトークンがない場合、
+   * QRを読み直してもブラウザ側が開くだけでアイコン側は直らないため、
+   * 「アイコンを消して入れ直す」手順まで案内する。
+   */
+  function tokenMissingMessage() {
+    const isStandalone =
+      (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ||
+      (window.navigator.standalone === true);
+    if (isStandalone) {
+      return 'ホーム画面のこのアイコンを一度削除してから、QRコードを読み直して、もう一度「ホーム画面に追加」してください。';
+    }
+    return 'QRコードをもう一度読み込んでください。';
+  }
+
+  async function onRetry() {
+    // トークンがない場合は再試行しても意味がないので、状況に応じた復旧手順を案内する
+    if (!appState.token) {
+      showErrorScreen(tokenMissingMessage());
+      return;
+    }
+    showScreen('loading');
+    try {
+      const result = await callApi({ action: 'getStaffStatus', token: appState.token });
+      if (!result.success) {
+        showErrorScreen(result.message);
+        return;
+      }
+      appState.staffName     = result.name;
+      appState.currentStatus = result.status;
+      renderPendingBanner(result.pendingFixes);
+      updateMainScreen();
+      showScreen('main');
+    } catch (err) {
+      showErrorScreen('通信エラーが続いています。電波の良いところでしばらくしてから再度お試しください。');
+    }
+  }
+
+  // ============================================================
+  // 起動
+  // ============================================================
+  window.addEventListener('load', init);
+
+  // ============================================================
+  // Service Worker 登録（PWA用）
+  // ============================================================
+  // 登録に失敗しても打刻機能には一切影響させない（try-catch + catch で二重に保護）。
+  window.addEventListener('load', function() {
+    if ('serviceWorker' in navigator) {
+      try {
+        navigator.serviceWorker.register('./sw.js').catch(function() { /* 登録失敗は無視 */ });
+      } catch (e) { /* 登録失敗は無視 */ }
+    }
+  });
+</script>
+</body>
+</html>
